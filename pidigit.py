@@ -2,11 +2,10 @@ import mpmath as mp
 
 class PiDigit(int):
     def __new__(cls, startPos, endPos):
-        mp.dps = endPos + 5
         startPos = startPos
         endPos = endPos
-        pi = mp.nstr(mp.pi, endPos + 1)[1:]
-        value = int(pi[startPos - 1 : endPos])
+        pi = mp.nstr(mp.pi, endPos + 5)[1:]
+        value = int(pi[startPos - 1 : endPos]) if startPos - 1 != endPos else int(pi[startPos-1])
         obj = super().__new__(cls, value)
         obj.startPos = startPos
         obj.end = endPos
