@@ -1,15 +1,5 @@
-'''
-Hello! There you are... the SemiColon's lexer code!
-
-Main structure of the code:
-    I Tokens lists ..... 10
-    II Basic lexer ..... 101
-    III Lexers ......... 121
-    IV Assembly ........ 229
-    V Log .............. 245
-
-'''
 import re # matching special samples
+import bullshit
 
 SINGLE_TOKENS: list[tuple[str,str]] = [ # single tokens. used pretty rare
     
@@ -38,7 +28,7 @@ TWO_DIGIT_TOKENS: list[tuple[str,str]] = [ # two digit tokens. section markers a
 TREE_DIGIT_TOKENS: list[tuple[str,str]] = [ # three digit tokens. only type markers. used almost always
     # type markers (8 total)
     (r'\.\.\.', 'VAR'), # variable
-    (r'\.\.,', 'FNC'), # function
+    (r'\.\.,', 'MGC'), # magic variables, classes and e.t.c.
     (r'\.,\.', 'ARR'), # array
     (r',\.\.', 'NUM'), # number (int and float)
     (r'\.,,', 'CLS'), # class (future)
@@ -95,18 +85,27 @@ SIX_DIGIT_TOKENS: list[tuple[str,str]] = [ # six digit tokens. only instructions
     (r',\.,\.\.\.', 'CNT'), # continue
         # functions instructions
     (r'\.\.\.\.\.,', 'RTN'), # return 
-    
+        # exception handling
+    (r'\.,\.\.,,', 'TRY'),
+    (r',\.,,\.\.', 'FAL'),
+    (r'\.,\.\.\.,', 'FNL'),
+
     # comments
     (r'.', None), # any other symbol is a comment
     (r'', None),
 ]
 
-def lexer(code: str, TOKENS_LIST: list[tuple[str,str]], length: int = None) -> tuple | None:
+INSTRUCTIONS = [token[1] for token in SIX_DIGIT_TOKENS][:len(SIX_DIGIT_TOKENS) - 2]
+
+current_position = 0
+
+def lexer(code: str, TOKENS_LIST: list[tuple[str,str]], length: int = None) -> tuple | None | bullshit.Bullshit:
     '''
     Matching and splitting code to tokens
     '''
+    global current_position
     length = len(code) if not length else length
-    count = 0
+    current_position = 0
     res_token = None
     for pattern, token_type in TOKENS_LIST: # Matching tokens with the code
         match = re.match(pattern, code[:length])
@@ -114,13 +113,13 @@ def lexer(code: str, TOKENS_LIST: list[tuple[str,str]], length: int = None) -> t
             if token_type: # if it's type s not none
                 res_token = (token_type, match.group()) # append it in tokens list
             code = code[len(match.group()):]
-            count += len(match.group())                              
+            current_position += len(match.group())                     
             break
     else:
-        raise SyntaxError(f"Unknown symbol: {code} in position {count}") 
+        return bullshit.SyntaxFailure(f"unknown symbol '{code}'")
     return res_token # return tokens list
 
-def starter_lexer(code: str) -> list[tuple[str, str]] | str:
+def starter_lexer(code: str) -> list[tuple[str, str]] | str | bullshit.Bullshit:
     '''
     Lexing first part of code to tokens (using lexer())
     '''
@@ -145,25 +144,27 @@ def starter_lexer(code: str) -> list[tuple[str, str]] | str:
                                 if additional_section:
                                     code = code[2:]
                                     match additional_section[0]:
-                                        case 'DSC':
+                                        case 'DSC' | 'ISP':
                                             tokens_res.append(additional_section)
                             else:
-                                return ("error", "SyntaxError", "expected an instruction's name")
+                                return bullshit.SyntaxFailure("expected an instruction's name")
                         case 'DSC':
                             tokens_res.append(first_section)
-                return ("success", tokens_res, code)
+                return (tokens_res, code)
             case _:
-                return ("error", "SyntaxError", 
-        "any instruction should start and end with a instruction splitter (',,'). Maybe you forgot one?")
+                return bullshit.SyntaxFailure(
+            "any instruction should start and end with a instruction splitter (',,'). Maybe you forgot one?")
+    return bullshit.SyntaxFailure(
+            "any instruction should start and end with a instruction splitter (',,'). Maybe you forgot one?")
 
-def data_lexer(code: str) -> list[tuple[str, str]] | str:
+def data_lexer(code: str) -> list[tuple[str, str]] | str | bullshit.Bullshit:
     '''
     Lexing main content (data) of code depending on its type (using lexer())
     '''
     tokens_res = []
     datatype = lexer(code, TREE_DIGIT_TOKENS, 3)
-    code = code[3:]
     if datatype:
+        code = code[3:]
         tokens_res.append(datatype)
         match datatype[0]:
             case "NUM":
@@ -177,7 +178,7 @@ def data_lexer(code: str) -> list[tuple[str, str]] | str:
                         code = code[2:]
                         tokens_res.append(data_end)
                     else:
-                        return ("error", "SyntaxError", "expected end of data in NUM declaration")
+                        return bullshit.SyntaxFailure("expected end of data in NUM declaration")
             case "BUL":
                 bool_token = lexer(code, BUL_REPR, 1)
                 if bool_token:
@@ -188,7 +189,7 @@ def data_lexer(code: str) -> list[tuple[str, str]] | str:
                         code = code[2:]
                         tokens_res.append(data_end)
                     else:
-                        return ("error", "SyntaxError", "expected end of data in BUL declaration")
+                        return bullshit.SyntaxFailure("expected end of data in BUL declaration")
             case 'NOT':
                 tokens_res.append(('DEFAULT', ''))
                 data_end = lexer(code, TWO_DIGIT_TOKENS, 2)
@@ -196,44 +197,37 @@ def data_lexer(code: str) -> list[tuple[str, str]] | str:
                     code = code[2:]
                     tokens_res.append(data_end)
                 else:
-                    return ("error", "SyntaxError", "expected end of data in NOT declaration")
-            case 'ARR' | 'STR' | 'VAR' | 'FNC':
+                    return bullshit.SyntaxFailure("expected end of data in NOT declaration")
+            case 'ARR' | 'STR' | 'VAR':
                 while True:
                     first_section = lexer(code, TWO_DIGIT_TOKENS, 2)
                     code = code[2:]
                     if first_section:
                         match first_section[0]:
-                            case 'ISC':
-                                tokens_res.append(first_section)
-                                additional_section = lexer(code, TWO_DIGIT_TOKENS, 2)
-                                if additional_section:
-                                    code = code[2:]
-                                    match additional_section[0]:
-                                        case 'DSC':
-                                            tokens_res.append(additional_section)
                             case 'DSC':
                                 tokens_res.append(first_section)
                             case 'DSP':
                                 tokens_res.append(first_section)
                                 break
                     recursion_res = data_lexer(code)
-                    if recursion_res[0] == 'error':
+                    if isinstance(recursion_res, bullshit.Bullshit):
                         return recursion_res
-                    tokens_res += recursion_res[1]
-                    code = recursion_res[2]
-                    DSP = lexer(code, TWO_DIGIT_TOKENS, 2)
-                    if DSP:
-                        code = code[2:]
-                        match DSP[0]:
+                    tokens_res += recursion_res[0]
+                    code = recursion_res[1]
+                    elementEnd = lexer(code, TWO_DIGIT_TOKENS, 2)
+                    if elementEnd:
+                        match elementEnd[0]:
                             case 'DSP':
-                                tokens_res.append(DSP)
-                                continue
-                            #TODO nested functions
+                                code = code[2:]
+                                tokens_res.append(elementEnd)
+                                break
+                            case 'DSC':
+                                pass
                             case _:
-                                return ("error", "SyntaxError", "expected a data splitter after data")
-    return ("success", tokens_res, code)
+                                return bullshit.SyntaxFailure("expected a data splitter at the end of array")
+    return (tokens_res, code)
 
-def main_lexer(code: str) -> list[tuple[str, str]] | str:
+def main_lexer(code: str, stop_token = None) -> list[tuple[str, str]] | str | bullshit.Bullshit:
     '''
     Assembly off all lexers into one. Main lexer
                                                 Using:
@@ -243,18 +237,25 @@ def main_lexer(code: str) -> list[tuple[str, str]] | str:
     '''
     tokens_res = []
     while code:
+        stop = lexer(code, TWO_DIGIT_TOKENS, 2)
+        if stop and stop[0] == stop_token:
+            break
         starter_result = starter_lexer(code)
-        if starter_result[0] == 'error':
+        if isinstance(starter_result, bullshit.Bullshit):
             return starter_result
-        code = starter_result[2]
-        tokens_res += starter_result[1]
+        code = starter_result[1]
+        tokens_res += starter_result[0]
         data_tokens = data_lexer(code)
-        if data_tokens[0] == 'error':
+        if isinstance(data_tokens, bullshit.Bullshit):
             return data_tokens
-        code = data_tokens[2]
-        tokens_res += data_tokens[1]
-    return tokens_res
+        code = data_tokens[1]
+        tokens_res += data_tokens[0]
+    return (tokens_res, code)
 
 if __name__ == "__main__": #? Logs
     code = input()
-    print(main_lexer(code))
+    result = main_lexer(code)
+    if isinstance(result, bullshit.Bullshit):
+        print(result)
+    else:
+        print(main_lexer(code)[0])
